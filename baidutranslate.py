@@ -61,4 +61,3 @@ class BaiduTranlate(object):
 if __name__ == '__main__':
     spider = BaiduTranlate()
     spider.run()
-
