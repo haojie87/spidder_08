@@ -1,112 +1,70 @@
-from selenium import webdriver
-import pymysql
+import requests
+import execjs
+import re
 
-class GovSpider(object):
+class BaiduTranslate(object):
     def __init__(self):
-        self.url = 'http://www.mca.gov.cn/article/sj/xzqh/2019/'
-        # 设置无界面模式
-        self.options = webdriver.ChromeOptions()
-        self.options.add_argument('--headless')
-        self.browser = webdriver.Chrome(options=self.options)
-        self.db = pymysql.connect(
-            'localhost','root','123456','govdb',charset='utf8'
-        )
-        self.cursor = self.db.cursor()
-        # 用于executemany([(),(),()])
-        self.province = []
-        self.city = []
-        self.county = []
+        self.get_url = 'https://fanyi.baidu.com/'
+        self.post_url = 'https://fanyi.baidu.com/v2transapi?from=en&to=zh'
+        self.headers = {
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "zh-CN,zh;q=0.9",
+            "cache-control": "max-age=0",
+            "cookie": "BAIDUID=11DF7A4BB8E40E7BD65C50336A33AFB4:FG=1; BIDUPSID=11DF7A4BB8E40E7BD65C50336A33AFB4; PSTM=1570851270; BDORZ=B490B5EBF6F3CD402E515D22BCDA1598; REALTIME_TRANS_SWITCH=1; FANYI_WORD_SWITCH=1; HISTORY_SWITCH=1; SOUND_SPD_SWITCH=1; SOUND_PREFER_SWITCH=1; delPer=0; H_PS_PSSID=1435_21110_29567_29220_26350; PSINO=1; locale=zh; Hm_lvt_64ecd82404c51e03dc91cb9e8c025574=1571111905,1571381206; from_lang_often=%5B%7B%22value%22%3A%22en%22%2C%22text%22%3A%22%u82F1%u8BED%22%7D%2C%7B%22value%22%3A%22zh%22%2C%22text%22%3A%22%u4E2D%u6587%22%7D%2C%7B%22value%22%3A%22jp%22%2C%22text%22%3A%22%u65E5%u8BED%22%7D%5D; to_lang_often=%5B%7B%22value%22%3A%22jp%22%2C%22text%22%3A%22%u65E5%u8BED%22%7D%2C%7B%22value%22%3A%22en%22%2C%22text%22%3A%22%u82F1%u8BED%22%7D%2C%7B%22value%22%3A%22zh%22%2C%22text%22%3A%22%u4E2D%u6587%22%7D%5D; Hm_lpvt_64ecd82404c51e03dc91cb9e8c025574=1571385691; __yjsv5_shitong=1.0_7_bf58e74149ee1c34157a80ec6c0b6d9674d2_300_1571385689738_43.254.90.134_9bea61e6; yjs_js_security_passport=b25d1ff3558c35981bf191ffc555542b875eea76_1571385690_js",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "none",
+            "sec-fetch-user": "?1",
+            "upgrade-insecure-requests": "1",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.120 Safari/537.36",
+        }
 
-    # 提取数据
-    def get_data(self):
-        self.browser.get(self.url)
-        node = self.browser.find_element_by_partial_link_text('县以上行政区划代码')
-        # 先判断此节点之前是否抓取过
-        link = node.get_attribute('href')
-        sel = 'select url from version where url=%s'
-        result = self.cursor.execute(sel,[link])
-        if not result:
-            # 1.抓取
-            self.get_code(node)
-            # 2.把此链接存入数据库version表中
-            ins = 'insert into version values(%s)'
-            self.cursor.execute(ins,[link])
-            self.db.commit()
-        else:
-            print('未更新')
+    # 获取gtk和token
+    def get_gtk_token(self):
+        html = requests.get(url=self.get_url,headers=self.headers).text
+        # 获取gtk
+        p = re.compile("window\.gtk = '(.*?)'",re.S)
+        gtk = p.findall(html)[0]
+        # 获取token
+        p = re.compile("token: '(.*?)'", re.S)
+        token = p.findall(html)[0]
 
-    # 具体抓取数据
-    def get_code(self,node):
-        node.click()
-        # 切换句柄
-        all = self.browser.window_handles
-        self.browser.switch_to.window(all[1])
-        # 提取数据
-        tr_list = self.browser.find_elements_by_xpath('//tr[@height="19"]')
-        for tr in tr_list:
-            name = tr.text.split()[1]
-            code = tr.text.split()[0]
-            print(name,code)
-            # 上海市 上海市 浦东新区
-            if code[-4:] == '0000':
-                self.province.append((name,code))
-                # 把4个直辖市添加到city表
-                if code[:2] in ['11','12','31','50']:
-                    self.city.append((name,code,code))
+        return gtk,token
 
-            elif code[-2:] == '00':
-                pcode = code[:2] + '0000'
-                self.city.append((name,code,pcode))
-            else:
-                if code[:2] in ['11','12','31','50']:
-                    ccode = code[:2] + '0000'
-                else:
-                    ccode = code[:4] + '00'
-                self.county.append((name,code,ccode))
+    # 获取sign
+    def get_sign(self,word,gtk):
+        with open('translate.js','r') as f:
+            data = f.read()
+        # 执行js
+        jsobj = execjs.compile(data)
+        sign = jsobj.eval('e("{}","{}")'.format(word,gtk))
 
-        self.insert_mysql()
-
-    def insert_mysql(self):
-        # 1.先清除原有数据
-        del1 = 'delete from province'
-        del2 = 'delete from city'
-        del3 = 'delete from county'
-        self.cursor.execute(del1)
-        self.cursor.execute(del2)
-        self.cursor.execute(del3)
-        self.db.commit()
-        # 2.插入新的数据
-        ins1 = 'insert into province values(%s,%s)'
-        ins2 = 'insert into city values(%s,%s,%s)'
-        ins3 = 'insert into county values(%s,%s,%s)'
-        self.cursor.executemany(ins1,self.province)
-        self.cursor.executemany(ins2,self.city)
-        self.cursor.executemany(ins3,self.county)
-        self.db.commit()
+        return sign
 
     def run(self):
-        self.get_data()
-        self.browser.quit()
+        word = input('请输入要翻译的单词:')
+        gtk,token = self.get_gtk_token()
+        sign = self.get_sign(word,gtk)
+        formdata = {
+            "from": "auto",
+            "to": "auto",
+            "query": word,
+            "transtype": "realtime",
+            "simple_means_flag": "3",
+            "sign": sign,
+            "token": token,
+        }
+        html = requests.post(
+            url=self.post_url,
+            data=formdata,
+            headers=self.headers
+        ).json()
+        result = html['trans_result']['data'][0]['dst']
+        print(result)
 
 if __name__ == '__main__':
-    spider = GovSpider()
+    spider = BaiduTranslate()
     spider.run()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

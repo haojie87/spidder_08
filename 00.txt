@@ -1,0 +1,8 @@
+header = {
+"from":"en",
+"to":"zh",
+"query":"tiger",
+"simple_means_flag":"3",
+"sign":"505705.218200",
+"token":"ff89e1a2eae1f274a67eae31ac8d0ce1",
+}
